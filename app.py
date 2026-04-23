@@ -60,14 +60,22 @@ if submit_button:
 # Zona Exclusiva del Docente (Descarga del consolidado)
 st.divider()
 with st.expander("🔒 Zona del Docente (Descargar Reporte)"):
-    st.write("Descarga la tabla consolidada para tu informe mensual.")
-    if os.path.isfile(archivo_csv):
-        with open(archivo_csv, "rb") as f:
-            st.download_button(
-                label="📥 Descargar Reporte en Excel (CSV)",
-                data=f,
-                file_name=f"Reporte_Tutorias_{datetime.now().strftime('%Y_%m')}.csv",
-                mime="text/csv"
-            )
-    else:
-        st.info("Aún no hay registros este mes.")
+    st.write("Área restringida. Ingresa la contraseña para descargar el reporte.")
+    
+    # Campo de contraseña que oculta los caracteres
+    password = st.text_input("Contraseña de acceso", type="password")
+    
+    # Aquí defines tu contraseña (puedes cambiar "MecaUCB2026" por la que desees)
+    if password == "UCB.Meca2026":
+        if os.path.isfile(archivo_csv):
+            with open(archivo_csv, "rb") as f:
+                st.download_button(
+                    label="📥 Descargar Reporte en Excel (CSV)",
+                    data=f,
+                    file_name=f"Reporte_Tutorias_{datetime.now().strftime('%Y_%m')}.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.info("Aún no hay registros este mes.")
+    elif password != "":
+        st.error("Contraseña incorrecta. Acceso denegado.")
