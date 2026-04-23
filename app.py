@@ -1,81 +1,94 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import os
+from datetime import datetime, timezone, timedelta
+from streamlit_gsheets import GSheetsConnection
 
-# Configuración de la página
-st.set_page_config(page_title="Registro de Tutorías UCB",
-                   page_icon="⚙️",
-                   layout="centered")
+# 1. Configuración de la página
+st.set_page_config(page_title="Registro de Tutorías UCB", page_icon="⚙️", layout="centered")
 
-# Encabezado
-st.title(body="Registro de Atención a Estudiantes")
-st.subheader(body="M.Sc. Ing. Bernardo Quiroga Turdera")
-st.caption(body="DCT - Ingeniería Mecatrónica - UCB Sede Tarija")
+# 2. Encabezado personalizado
+st.title("Registro de Atención a Estudiantes")
+st.subheader("M.Sc. Ing. Bernardo Quiroga Turdera")
+st.caption("Departamento de Ingeniería Mecatrónica - UCB Sede Tarija")
 st.divider()
 
-# Formulario de ingreso de datos
+# 3. Conexión a Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 4. Formulario de Ingreso de Datos
 with st.form("registro_form"):
     st.write("### Por favor, ingresa tus datos:")
+    
+    nombre = st.text_input("Nombre y Apellido del Estudiante")
+    semestre = st.selectbox("Semestre", ["1ro", "2do", "3ro", "4to", "5to", "6to", "7mo", "8vo", "9no", "Proyecto de Grado"])
+    
+    tipo_atencion = st.selectbox("Tipo de Atención", [
+        "Atención regular (Mar-Jue 08:30 - 12:30)",
+        "Tutoría de Grado",
+        "Relatoría",
+        "Tutoría de Pasantía"
+    ])
+    
+    tema = st.text_area("Tema Tratado o Avance de la Sesión")
+    
+    submit_button = st.form_submit_button(label="Registrar Asistencia", type="primary")
 
-    nombre = st.text_input("Nombre y Apellidos del Estudiante")
-    semestres = ["1ro", "2do", "3ro", "4to", "5to", "6to", "7mo", "8vo", "9no", "Proyecto de Grado"]
-    semestre = st.selectbox(label="Semestre", options=semestres)
-    atenciones = ["Atención regular (Mar-Jue 08:30 - 12:30)", "Tutoría de Grado", "Relatoría", "Tutoría de Prácticas Preprofesionales"]
-    tipo_atencion = st.selectbox(label="Tipo de Atención", options=atenciones)
-
-    tema = st.text_area(label="Tema Tratado o Avance de la Sesión")
-
-    # Botón de envío
-    submit_button = st.form_submit_button(label="Registra Asistencia",
-                                          type="primary",
-                                          )
-
-# Lógica de guardado al presionar el botón
-archivo_csv = "registro_mensual.csv"
-
+# 5. Lógica de guardado en Google Sheets
 if submit_button:
     if nombre and tema:
-        # Crear el registro con la fecha y hora actual
-        nuevo_registro = {
-            "Fecha y Hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # Hora de Bolivia (UTC-4)
+        zona_horaria_bo = timezone(timedelta(hours=-4))
+        hora_registro = datetime.now(zona_horaria_bo).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Crear el nuevo registro
+        nuevo_registro = pd.DataFrame([{
+            "Fecha y Hora": hora_registro,
             "Estudiante": nombre,
             "Semestre": semestre,
             "Tipo": tipo_atencion,
             "Tema/Avance": tema
-        }
-
-        df_nuevo = pd.DataFrame([nuevo_registro])
-
-        # Guardar en CSV (crea el archivo si no existe, o añade la fila si existe)
-        if not os.path.isfile(archivo_csv):
-            df_nuevo.to_csv(archivo_csv, index=False)
-        else:
-            df_nuevo.to_csv(archivo_csv, mode="a", header=False, index=False)
-
+        }])
+        
+        try:
+            # Leer datos existentes (ignora el caché con ttl=0)
+            df_existente = conn.read(usecols=[0, 1, 2, 3, 4], ttl=0)
+            # Limpiar filas vacías que Google Sheets a veces genera
+            df_existente = df_existente.dropna(how="all") 
+            # Combinar lo viejo con lo nuevo
+            df_actualizado = pd.concat([df_existente, nuevo_registro], ignore_index=True)
+        except Exception:
+            # Si la hoja está totalmente vacía o es la primera vez
+            df_actualizado = nuevo_registro
+            
+        # Actualizar la hoja de cálculo en la nube
+        conn.update(data=df_actualizado)
         st.success(f"¡Registro guardado exitosamente, {nombre}! Puedes retirarte.")
     else:
         st.error("Por favor, completa tu nombre y el tema tratado antes de enviar.")
 
-# Zona Exclusiva del Docente (Descarga del consolidado)
+# 6. Zona Exclusiva del Docente (Descarga del consolidado)
 st.divider()
 with st.expander("🔒 Zona del Docente (Descargar Reporte)"):
     st.write("Área restringida. Ingresa la contraseña para descargar el reporte.")
-    
-    # Campo de contraseña que oculta los caracteres
     password = st.text_input("Contraseña de acceso", type="password")
     
-    # Aquí defines tu contraseña (puedes cambiar "MecaUCB2026" por la que desees)
     if password == "UCB.Meca2026":
-        if os.path.isfile(archivo_csv):
-            with open(archivo_csv, "rb") as f:
-                st.download_button(
-                    label="📥 Descargar Reporte en Excel (CSV)",
-                    data=f,
-                    file_name=f"Reporte_Tutorias_{datetime.now().strftime('%Y_%m')}.csv",
-                    mime="text/csv"
-                )
-        else:
-            st.info("Aún no hay registros este mes.")
+        try:
+            # Traer los datos limpios desde Google Sheets
+            df_descarga = conn.read(usecols=[0, 1, 2, 3, 4], ttl=0).dropna(how="all")
+            csv = df_descarga.to_csv(index=False).encode('utf-8')
+            
+            zona_horaria_bo = timezone(timedelta(hours=-4))
+            mes_actual = datetime.now(zona_horaria_bo).strftime('%Y_%m')
+            
+            st.download_button(
+                label="📥 Descargar Reporte en Excel (CSV)",
+                data=csv,
+                file_name=f"Reporte_Tutorias_{mes_actual}.csv",
+                mime="text/csv"
+            )
+            st.info("💡 Tip: Los datos ya están respaldados en tu cuenta de Google Drive.")
+        except Exception as e:
+            st.warning("Aún no hay registros o revisa la conexión a Google Sheets.")
     elif password != "":
         st.error("Contraseña incorrecta. Acceso denegado.")
